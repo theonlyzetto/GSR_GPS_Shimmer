@@ -1,5 +1,7 @@
 📍 GSR + GPS Processing Pipeline (Shimmer + eDiary + GPX) | Stand 20260128
+
 Dieses Projekt verarbeitet EDA/GSR-Daten vom Shimmer, Events/Runs aus einer eDiary-SQLite-DB und GPS-Tracks aus GPX-Dateien zu einer konsistenten Zeit- und Ortsdarstellung inkl. Karten- und QGIS-Export.
+
 Grundprinzip (wichtig)
 Die Datenquellen haben klar getrennte Rollen:
 •	eDiary-DB
@@ -16,6 +18,7 @@ o	Nur Fallback, falls GPX Lücken hat
 o	Physiologische Messung (GSR / Conductance)
 ________________________________________
 🧠 Sampling-Strategie
+
 •	EDA-Verarbeitung:
 o	Analyse auf Original-Samplingrate (z. B. 4 Hz, 32 Hz, 128 Hz)
 o	Glättung, SCL, SCR-Peak-Detection erfolgen ohne Downsampling
@@ -27,6 +30,7 @@ o	Separate 1 Hz-View für:
 o	Keine Informationsverluste in der EDA-Analyse
 ________________________________________
 🗺️ GPS-Handling (GPX-first)
+
 1.	DB-GPS laden und auf 1 Hz resamplen (nearest)
 2.	GPX laden
 o	Robuster Parser für GPX 1.0 und 1.1 (Namespace-agnostisch)
@@ -40,6 +44,7 @@ o	position_df = GPX ⟶ DB-GPS (Fallback)
 o	Positionsdaten werden auf das effektive Run-Fenster begrenzt
 ________________________________________
 📊 EDA-Verarbeitung
+
 •	Conductance aus Shimmer-CSV
 •	Klassische SCR-Detektion:
 o	lokale SCL
@@ -50,6 +55,7 @@ o	Trigger + Latenz
 •	Separate 4 Hz- und 1 Hz-Views (df_gsr_4hz, df_gsr_1hz)
 ________________________________________
 📍 Event-Geokodierung
+
 •	Events stammen ausschließlich aus der DB
 •	Geokodierung erfolgt zeitbasiert:
 •	Event.Timestamp  →  position_df.Timestamp  →  (lat, lon)
@@ -64,4 +70,21 @@ ________________________________________
 o	QGIS-kompatibel
 o	SCR-only
 o	Feedback-to-SCR Mapping
+
+_______________________________________________________________________________________________________-
+
+Stabilize GSR–GPS pipeline: GPX-first positioning, robust GPX parsing, 4Hz EDA workflow
+
+- Separate roles for data sources:
+  * eDiary DB = runs, events, participants (temporal semantics)
+  * GPX = primary spatial position (Android DB-GPS can freeze)
+  * DB-GPS = fallback only
+
+- Robust GPX parser (GPX 1.0 + 1.1, namespace-agnostic)
+- Automatic GPX time offset detection (UTC vs local, ±3h)
+- GPX-first position_df with DB fallback
+- EDA processed at native sampling rate (e.g. 4 Hz), GPS mapping at 1 Hz
+- Fixed SCL_Global / SCL_Baseline availability in plotting
+- Cleaned merge logic to avoid NaN GPS rows and NameErrors
+
 
