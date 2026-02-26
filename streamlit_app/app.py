@@ -3,7 +3,6 @@ import tempfile
 from pathlib import Path
 import json
 import sys
-from pathlib import Path
 
 # Repo-Root in den Python-Pfad aufnehmen (damit "import src" funktioniert)
 REPO_ROOT = Path(__file__).resolve().parents[1]
