@@ -515,6 +515,15 @@ def plot_summary(df_gsr: pd.DataFrame, merged: pd.DataFrame, feedback_geo: pd.Da
     plt.close()
     return out_png
 
+def zip_outputs(paths: list[str], zip_path: str) -> str:
+    from zipfile import ZipFile
+    import os
+
+    with ZipFile(zip_path, "w") as z:
+        for p in paths:
+            if p and os.path.exists(p):
+                z.write(p, arcname=os.path.basename(p))
+    return zip_path
 
 # -------------------- High-level run --------------------
 
