@@ -479,7 +479,6 @@ def plot_summary(
     fig = plt.figure(figsize=(14, 10))
     gs = fig.add_gridspec(2, 1, height_ratios=[2, 1])
     ax1, ax2 = gs.subplots()
-    fig.suptitle(title, fontsize=14)
 
     # ---------- Titel (oben mittig) ----------
     fig.suptitle(title, fontsize=14)
@@ -645,7 +644,7 @@ def plot_summary(
     out_png = os.path.join(
         out_dir, f"plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
     )
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig(out_png, dpi=180)
     plt.close()
     return out_png
@@ -764,12 +763,28 @@ def run_pipeline(
     feedback_geo.to_csv(out_events, index=False)
 
     kml_paths = export_kml_kmz(merged, out_kml_dir, label)
+    study = (
+        str(run_meta.get("study", "NA"))
+        if "run_meta" in locals() and isinstance(run_meta, dict)
+        else "NA"
+    )
+    name = (
+        str(run_meta.get("name", "NA"))
+        if "run_meta" in locals() and isinstance(run_meta, dict)
+        else "NA"
+    )
+
+    plot_title = (
+        f"{study} | {name} | run{run_id} | {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    )
+
     plot_path = plot_summary(
         df_gsr,
         merged,
         feedback_geo,
         out_plot_dir,
-        title=f"GSR/GPS – {label} (gps={gps_used})",
+        title=plot_title,
+        cfg=cfg,
     )
 
     zip_path = os.path.join(out_dir, f"outputs_{label}_{time_str}.zip")
