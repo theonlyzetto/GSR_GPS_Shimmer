@@ -32,6 +32,7 @@ RUN_TABLE = "run"
 
 # -------------------- Config --------------------
 
+
 @dataclass
 class PipelineConfig:
     sampling_rate_hz: int = 4
@@ -62,11 +63,13 @@ class PipelineConfig:
 
 # -------------------- Helpers --------------------
 
+
 def pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
     for c in candidates:
         if c in df.columns:
             return c
     return None
+
 
 def try_pick_by_substring(columns: list[str], must_contain: list[str]) -> list[str]:
     out = []
@@ -81,6 +84,7 @@ def try_pick_by_substring(columns: list[str], must_contain: list[str]) -> list[s
             out.append(c)
     return out
 
+
 def safe_to_dt(x):
     try:
         # numeric ms epoch
@@ -90,22 +94,27 @@ def safe_to_dt(x):
     except Exception:
         return pd.NaT
 
+
 def _safe_slug(s: str) -> str:
     s = "" if s is None else str(s)
     s = re.sub(r"[^A-Za-z0-9_\-]+", "_", s).strip("_")
     return s if s else "NA"
+
 
 def butter_lowpass_filter(data, cutoff, fs, order=4):
     nyq = 0.5 * fs
     b, a = butter(order, cutoff / nyq, btype="low", analog=False)
     return filtfilt(b, a, data)
 
+
 def lowpass(series: pd.Series, cutoff_hz: float, fs: float, order=4) -> pd.Series:
     x = series.astype(float).interpolate().bfill().ffill().to_numpy()
     y = butter_lowpass_filter(x, cutoff_hz, fs, order)
     return pd.Series(y, index=series.index)
 
+
 # -------------------- GPX --------------------
+
 
 def read_gpx_file(gpx_path: str) -> pd.DataFrame:
     """
@@ -133,12 +142,21 @@ def read_gpx_file(gpx_path: str) -> pd.DataFrame:
     gps = gps.dropna().sort_values("Timestamp")
     return gps
 
+
 def normalize_gps_1hz(gps: pd.DataFrame) -> pd.DataFrame:
-    gps = gps.dropna(subset=["Timestamp","latitude","longitude"]).sort_values("Timestamp")
+    gps = gps.dropna(subset=["Timestamp", "latitude", "longitude"]).sort_values(
+        "Timestamp"
+    )
     gps = gps.set_index("Timestamp").resample("1s").nearest().reset_index()
     return gps
 
-def best_gpx_offset_hours(gps: pd.DataFrame, run_start: pd.Timestamp, run_end: pd.Timestamp, max_abs_h: int = 3) -> int:
+
+def best_gpx_offset_hours(
+    gps: pd.DataFrame,
+    run_start: pd.Timestamp,
+    run_end: pd.Timestamp,
+    max_abs_h: int = 3,
+) -> int:
     """
     Try offsets in [-max_abs_h..+max_abs_h] hours and choose the one that yields most GPS points inside run window.
     """
@@ -157,6 +175,7 @@ def best_gpx_offset_hours(gps: pd.DataFrame, run_start: pd.Timestamp, run_end: p
 
 # -------------------- DB: runs / gps / feedback --------------------
 
+
 def list_runs(db_path: str) -> pd.DataFrame:
     conn = sqlite3.connect(db_path)
     try:
@@ -165,7 +184,10 @@ def list_runs(db_path: str) -> pd.DataFrame:
         conn.close()
     return runs
 
-def build_run_items(runs: pd.DataFrame, gsr_min: pd.Timestamp, gsr_max: pd.Timestamp) -> list[dict]:
+
+def build_run_items(
+    runs: pd.DataFrame, gsr_min: pd.Timestamp, gsr_max: pd.Timestamp
+) -> list[dict]:
     if runs is None or runs.empty:
         return []
     col_id = pick_col(runs, ["id", "runId", "run_id"])
@@ -195,11 +217,16 @@ def build_run_items(runs: pd.DataFrame, gsr_min: pd.Timestamp, gsr_max: pd.Times
             "name": str(r.get("name", "")).strip(),
         }
         it["overlap_s"] = overlap_s(gsr_min, gsr_max, it["start"], it["end"])
-        it["display"] = f"{it['study']} | {it['name']} | run_id={it['run_id']} | {it['start']} -> {it['end']} | overlap={int(it['overlap_s'])}s".strip(" |")
+        it["display"] = (
+            f"{it['study']} | {it['name']} | run_id={it['run_id']} | {it['start']} -> {it['end']} | overlap={int(it['overlap_s'])}s".strip(
+                " |"
+            )
+        )
         items.append(it)
 
     items = sorted(items, key=lambda x: x["overlap_s"], reverse=True)
     return items
+
 
 def read_feedback(db_path: str, run_id: str | None = None) -> pd.DataFrame:
     conn = sqlite3.connect(db_path)
@@ -224,8 +251,11 @@ def read_feedback(db_path: str, run_id: str | None = None) -> pd.DataFrame:
     if "note" not in fb.columns:
         fb["note"] = ""
 
-    fb = fb.dropna(subset=["Timestamp"])[["Timestamp", "feeling", "note"]].sort_values("Timestamp")
+    fb = fb.dropna(subset=["Timestamp"])[["Timestamp", "feeling", "note"]].sort_values(
+        "Timestamp"
+    )
     return fb
+
 
 def read_gps_from_db(db_path: str, run_id: str | None = None) -> pd.DataFrame:
     conn = sqlite3.connect(db_path)
@@ -246,16 +276,23 @@ def read_gps_from_db(db_path: str, run_id: str | None = None) -> pd.DataFrame:
 
 # -------------------- GSR --------------------
 
-def read_gsr_csv(csv_path: str, ts_col: str, gsr_col: str, cfg: PipelineConfig) -> pd.DataFrame:
+
+def read_gsr_csv(
+    csv_path: str, ts_col: str, gsr_col: str, cfg: PipelineConfig
+) -> pd.DataFrame:
     # Shimmer files are often TSV with header offset; be robust:
     try:
         df = pd.read_csv(csv_path, sep="\t", header=1, skiprows=[2])
     except Exception:
         df = pd.read_csv(csv_path)
 
-    df = df.drop(columns=[c for c in df.columns if str(c).startswith("Unnamed")], errors="ignore")
+    df = df.drop(
+        columns=[c for c in df.columns if str(c).startswith("Unnamed")], errors="ignore"
+    )
     if ts_col not in df.columns or gsr_col not in df.columns:
-        raise FileNotFoundError(f"Spalten nicht gefunden. Timestamp='{ts_col}', GSR='{gsr_col}'.")
+        raise FileNotFoundError(
+            f"Spalten nicht gefunden. Timestamp='{ts_col}', GSR='{gsr_col}'."
+        )
     df["Timestamp"] = pd.to_datetime(df[ts_col], unit="ms", errors="coerce")
     df = df[["Timestamp", gsr_col]].rename(columns={gsr_col: "Conductance"})
     df = df.dropna(subset=["Timestamp", "Conductance"]).sort_values("Timestamp")
@@ -270,11 +307,14 @@ def read_gsr_csv(csv_path: str, ts_col: str, gsr_col: str, cfg: PipelineConfig) 
 
     return df_1hz
 
+
 def detect_scr(df_1hz: pd.DataFrame, cfg: PipelineConfig) -> pd.DataFrame:
     # local baseline as rolling mean window (10s)
     scl_window_s = 10
     df = df_1hz.copy()
-    df["SCL_local"] = df["Conductance"].rolling(window=scl_window_s, min_periods=1).mean()
+    df["SCL_local"] = (
+        df["Conductance"].rolling(window=scl_window_s, min_periods=1).mean()
+    )
     df["Threshold"] = df["SCL_local"] + cfg.scr_offset
 
     sig = df["Conductance"].astype(float).to_numpy()
@@ -284,7 +324,7 @@ def detect_scr(df_1hz: pd.DataFrame, cfg: PipelineConfig) -> pd.DataFrame:
         sig,
         height=thr,
         distance=int(cfg.min_peak_distance_s * 1),
-        prominence=cfg.min_peak_prominence
+        prominence=cfg.min_peak_prominence,
     )
 
     df["SCR_Peak"] = 0
@@ -297,23 +337,33 @@ def detect_scr(df_1hz: pd.DataFrame, cfg: PipelineConfig) -> pd.DataFrame:
     for idx in scr_indices:
         peak_time = df.loc[idx, "Timestamp"]
         pre_idx = idx
-        while pre_idx > 0 and df.loc[pre_idx, "Conductance"] > df.loc[pre_idx, "SCL_local"]:
+        while (
+            pre_idx > 0
+            and df.loc[pre_idx, "Conductance"] > df.loc[pre_idx, "SCL_local"]
+        ):
             pre_idx -= 1
         stim_time = df.loc[pre_idx, "Timestamp"]
-        if (last_trigger_time is None) or ((stim_time - last_trigger_time).total_seconds() > cfg.stimulus_window_s):
+        if (last_trigger_time is None) or (
+            (stim_time - last_trigger_time).total_seconds() > cfg.stimulus_window_s
+        ):
             df.loc[pre_idx, "Trigger"] = 1
             df.loc[idx, "SCR_Latency_s"] = (peak_time - stim_time).total_seconds()
             last_trigger_time = stim_time
 
     # global SCLs
     df_lp = df.set_index("Timestamp")
-    df_lp["SCL_Baseline"] = lowpass(df_lp["Conductance"], cfg.scl_baseline_cutoff_hz, 1, order=4)
-    df_lp["SCL_Global"] = lowpass(df_lp["Conductance"], cfg.scl_global_cutoff_hz, 1, order=4)
+    df_lp["SCL_Baseline"] = lowpass(
+        df_lp["Conductance"], cfg.scl_baseline_cutoff_hz, 1, order=4
+    )
+    df_lp["SCL_Global"] = lowpass(
+        df_lp["Conductance"], cfg.scl_global_cutoff_hz, 1, order=4
+    )
     df = df_lp.reset_index()
     return df
 
 
 # -------------------- Export --------------------
+
 
 def export_kml_kmz(merged: pd.DataFrame, out_dir: str, label: str) -> dict:
     os.makedirs(out_dir, exist_ok=True)
@@ -324,13 +374,18 @@ def export_kml_kmz(merged: pd.DataFrame, out_dir: str, label: str) -> dict:
 
     def safe_coord(v):
         try:
-            if pd.isna(v): return None
+            if pd.isna(v):
+                return None
             return float(v)
         except Exception:
             return None
 
     def color_for_value(v):
-        denom = (conductance_max - conductance_min) if conductance_max != conductance_min else 1.0
+        denom = (
+            (conductance_max - conductance_min)
+            if conductance_max != conductance_min
+            else 1.0
+        )
         norm = (v - conductance_min) / denom
         norm = min(max(norm, 0), 1)
         r = int(255 * norm)
@@ -345,41 +400,41 @@ def export_kml_kmz(merged: pd.DataFrame, out_dir: str, label: str) -> dict:
     kml_lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<kml xmlns="http://www.opengis.net/kml/2.2">',
-        '  <Document>',
-        f'    <name>GSR_3D_Track_{time_str}</name>',
-        '    <open>1</open>'
+        "  <Document>",
+        f"    <name>GSR_3D_Track_{time_str}</name>",
+        "    <open>1</open>",
     ]
 
     # Track
     kml_lines += [
-        '    <Placemark>',
-        '      <name>GPS Track</name>',
-        '      <Style><LineStyle>',
-        '        <color>800000ff</color>',
-        '        <width>4</width>',
-        '      </LineStyle></Style>',
-        '      <LineString>',
-        '        <tessellate>1</tessellate>',
-        '        <altitudeMode>relativeToGround</altitudeMode>',
-        '        <coordinates>'
+        "    <Placemark>",
+        "      <name>GPS Track</name>",
+        "      <Style><LineStyle>",
+        "        <color>800000ff</color>",
+        "        <width>4</width>",
+        "      </LineStyle></Style>",
+        "      <LineString>",
+        "        <tessellate>1</tessellate>",
+        "        <altitudeMode>relativeToGround</altitudeMode>",
+        "        <coordinates>",
     ]
 
-    denom = (conductance_max - conductance_min) if conductance_max != conductance_min else 1.0
+    denom = (
+        (conductance_max - conductance_min)
+        if conductance_max != conductance_min
+        else 1.0
+    )
     for _, r in merged.sort_values("Timestamp").iterrows():
         lon, lat = safe_coord(r["longitude"]), safe_coord(r["latitude"])
         if lon is None or lat is None:
             continue
         height = (r["Conductance"] - conductance_min) / denom * height_scale_m
-        kml_lines.append(f'          {lon},{lat},{height}')
+        kml_lines.append(f"          {lon},{lat},{height}")
 
-    kml_lines += [
-        '        </coordinates>',
-        '      </LineString>',
-        '    </Placemark>'
-    ]
+    kml_lines += ["        </coordinates>", "      </LineString>", "    </Placemark>"]
 
     # Bars
-    kml_lines += ['    <Folder>', '      <name>Conductance Vertical Bars</name>']
+    kml_lines += ["    <Folder>", "      <name>Conductance Vertical Bars</name>"]
     for _, r in merged.iterrows():
         lon, lat = safe_coord(r["longitude"]), safe_coord(r["latitude"])
         if lon is None or lat is None:
@@ -387,21 +442,21 @@ def export_kml_kmz(merged: pd.DataFrame, out_dir: str, label: str) -> dict:
         height = (r["Conductance"] - conductance_min) / denom * height_scale_m
         color = color_for_value(r["Conductance"])
         kml_lines += [
-            '      <Placemark>',
-            '        <Style><LineStyle>',
-            f'          <color>{color}</color>',
-            '          <width>3</width>',
-            '        </LineStyle></Style>',
-            '        <LineString>',
-            '          <altitudeMode>relativeToGround</altitudeMode>',
-            '          <coordinates>',
-            f'            {lon},{lat},0',
-            f'            {lon},{lat},{height}',
-            '          </coordinates>',
-            '        </LineString>',
-            '      </Placemark>'
+            "      <Placemark>",
+            "        <Style><LineStyle>",
+            f"          <color>{color}</color>",
+            "          <width>3</width>",
+            "        </LineStyle></Style>",
+            "        <LineString>",
+            "          <altitudeMode>relativeToGround</altitudeMode>",
+            "          <coordinates>",
+            f"            {lon},{lat},0",
+            f"            {lon},{lat},{height}",
+            "          </coordinates>",
+            "        </LineString>",
+            "      </Placemark>",
         ]
-    kml_lines += ['    </Folder>', '  </Document>', '</kml>']
+    kml_lines += ["    </Folder>", "  </Document>", "</kml>"]
 
     with open(kml_filename, "w", encoding="utf-8") as f:
         f.write("\n".join(kml_lines))
@@ -409,6 +464,7 @@ def export_kml_kmz(merged: pd.DataFrame, out_dir: str, label: str) -> dict:
         kmz.write(kml_filename, arcname=os.path.basename(kml_filename))
 
     return {"kml": kml_filename, "kmz": kmz_filename}
+
 
 def plot_summary(
     df_gsr: pd.DataFrame,
@@ -423,6 +479,7 @@ def plot_summary(
     fig = plt.figure(figsize=(14, 10))
     gs = fig.add_gridspec(2, 1, height_ratios=[2, 1])
     ax1, ax2 = gs.subplots()
+    fig.suptitle(title, fontsize=14)
 
     # ---------- Titel (oben mittig) ----------
     fig.suptitle(title, fontsize=14)
@@ -431,18 +488,42 @@ def plot_summary(
     ax1.plot(df_gsr["Timestamp"], df_gsr["Conductance"], label="Conductance", alpha=0.9)
 
     if "SCL_Global" in df_gsr.columns:
-        ax1.plot(df_gsr["Timestamp"], df_gsr["SCL_Global"], label="SCL 0.002 Hz", linewidth=1.3)
+        ax1.plot(
+            df_gsr["Timestamp"],
+            df_gsr["SCL_Global"],
+            label="SCL 0.002 Hz",
+            linewidth=1.3,
+        )
     if "SCL_Baseline" in df_gsr.columns:
-        ax1.plot(df_gsr["Timestamp"], df_gsr["SCL_Baseline"], label="Baseline 0.001 Hz", linewidth=1.3)
+        ax1.plot(
+            df_gsr["Timestamp"],
+            df_gsr["SCL_Baseline"],
+            label="Baseline 0.001 Hz",
+            linewidth=1.3,
+        )
 
     trigs = df_gsr[df_gsr.get("Trigger", 0) == 1]
     peaks = df_gsr[df_gsr.get("SCR_Peak", 0) == 1]
 
     if not trigs.empty:
-        ax1.scatter(trigs["Timestamp"], trigs["Conductance"], marker="v", s=70, color="orange", label="Trigger")
+        ax1.scatter(
+            trigs["Timestamp"],
+            trigs["Conductance"],
+            marker="v",
+            s=70,
+            color="orange",
+            label="Trigger",
+        )
     if not peaks.empty:
-        ax1.scatter(peaks["Timestamp"], peaks["Conductance"], marker="o", s=45, facecolor="salmon",
-                    edgecolor="firebrick", label="SCR Peak")
+        ax1.scatter(
+            peaks["Timestamp"],
+            peaks["Conductance"],
+            marker="o",
+            s=45,
+            facecolor="salmon",
+            edgecolor="firebrick",
+            label="SCR Peak",
+        )
 
     ax1.set_ylabel("Conductance (uS)")
     ax1.grid(alpha=0.25)
@@ -460,7 +541,11 @@ def plot_summary(
         tonic_start = float(df_gsr["SCL_Baseline"].iloc[0])
         tonic_end = float(df_gsr["SCL_Baseline"].iloc[-1])
         d_tonic = tonic_end - tonic_start
-        minutes = max(1e-9, (df_gsr["Timestamp"].iloc[-1] - df_gsr["Timestamp"].iloc[0]).total_seconds() / 60.0)
+        minutes = max(
+            1e-9,
+            (df_gsr["Timestamp"].iloc[-1] - df_gsr["Timestamp"].iloc[0]).total_seconds()
+            / 60.0,
+        )
         slope_per_min = d_tonic / minutes
         tonic_text = (
             f"TonicStart={tonic_start:.3f}\n"
@@ -489,66 +574,85 @@ def plot_summary(
     ).strip()
 
     ax1.text(
-        0.995, 0.995, info,
+        0.995,
+        0.995,
+        info,
         transform=ax1.transAxes,
-        ha="right", va="top",
+        ha="right",
+        va="top",
         fontsize=9,
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.85)
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
     )
 
     # ---------- Map (EPSG:3857 + Basemap) ----------
     from pyproj import Transformer
+
     transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
     def lonlat_to_xy(df: pd.DataFrame):
-        xs, ys = transformer.transform(df["longitude"].to_numpy(), df["latitude"].to_numpy())
+        xs, ys = transformer.transform(
+            df["longitude"].to_numpy(), df["latitude"].to_numpy()
+        )
         return xs, ys
 
-    # Track
     m = merged.dropna(subset=["longitude", "latitude"]).copy()
-    x_all, y_all = lonlat_to_xy(m)
-    ax2.plot(x_all, y_all, linewidth=3, alpha=0.85, color="black", label="GPS Track")
 
-    # Trigger (aus merged)
+    # Trigger VOR Track (damit sie "unten" liegen / nicht überdeckt werden)
     if "Trigger" in m.columns:
         m_tr = m[m["Trigger"] == 1]
         if not m_tr.empty:
             x_t, y_t = lonlat_to_xy(m_tr)
-            ax2.scatter(x_t, y_t, s=80, marker="v", color="orange", label="Trigger")
+            ax2.scatter(
+                x_t, y_t, s=90, marker="v", color="orange", label="Trigger", zorder=3
+            )
 
-    # Peaks (aus merged)
-    if "SCR_Peak" in m.columns:
-        m_pk = m[m["SCR_Peak"] == 1]
-        if not m_pk.empty:
-            x_p, y_p = lonlat_to_xy(m_pk)
-            ax2.scatter(x_p, y_p, s=60, marker="o", facecolor="salmon", edgecolor="firebrick", label="SCR Peak")
+    # Track danach: grauer, nicht transparent
+    x_all, y_all = lonlat_to_xy(m)
+    ax2.plot(
+        x_all,
+        y_all,
+        linewidth=3,
+        color="#666666",
+        alpha=1.0,
+        label="GPS Track",
+        zorder=2,
+    )
 
-    # Events
-    if feedback_geo is not None and not feedback_geo.empty and {"longitude", "latitude"}.issubset(feedback_geo.columns):
+    # Events (optional)
+    if (
+        feedback_geo is not None
+        and not feedback_geo.empty
+        and {"longitude", "latitude"}.issubset(feedback_geo.columns)
+    ):
         fbg = feedback_geo.dropna(subset=["longitude", "latitude"]).copy()
         x_e, y_e = lonlat_to_xy(fbg)
-        ax2.scatter(x_e, y_e, s=70, marker="o", color="gold", label="Event")
+        ax2.scatter(x_e, y_e, s=70, marker="o", color="gold", label="Event", zorder=4)
 
     # Basemap
     try:
         import contextily as ctx
+
         ctx.add_basemap(ax2, source=ctx.providers.OpenStreetMap.Mapnik, alpha=0.85)
     except Exception as e:
         print(f"⚠️ Basemap fehlgeschlagen: {e}")
 
-    ax2.set_title("GPS Track (Events, Triggers, Peaks)")
+    ax2.set_title("GPS Track (Events, Triggers)")
     ax2.set_xlabel("X (EPSG:3857)")
     ax2.set_ylabel("Y (EPSG:3857)")
     ax2.grid(alpha=0.15)
     ax2.legend(loc="upper right", fontsize=9)
 
-    out_png = os.path.join(out_dir, f"plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+    out_png = os.path.join(
+        out_dir, f"plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    )
     plt.tight_layout()
     plt.savefig(out_png, dpi=180)
     plt.close()
     return out_png
 
+
 # -------------------- High-level run --------------------
+
 
 def run_pipeline(
     gsr_csv_path: str,
@@ -583,15 +687,22 @@ def run_pipeline(
                 run_end = safe_to_dt(r[col_end])
 
     # Apply cutoff if we have run window
-    if run_start is not None and run_end is not None and not pd.isna(run_start) and not pd.isna(run_end):
+    if (
+        run_start is not None
+        and run_end is not None
+        and not pd.isna(run_start)
+        and not pd.isna(run_end)
+    ):
         gsr_min = df_gsr["Timestamp"].min()
         gsr_max = df_gsr["Timestamp"].max()
         eff_start = max(run_start, gsr_min)
         eff_end = min(run_end, gsr_max)
-        df_gsr = df_gsr[(df_gsr["Timestamp"] >= eff_start) & (df_gsr["Timestamp"] <= eff_end)].copy()
+        df_gsr = df_gsr[
+            (df_gsr["Timestamp"] >= eff_start) & (df_gsr["Timestamp"] <= eff_end)
+        ].copy()
 
     # GPS: GPX preferred
-    gps = pd.DataFrame(columns=["Timestamp","latitude","longitude"])
+    gps = pd.DataFrame(columns=["Timestamp", "latitude", "longitude"])
     gps_used = "none"
     if gpx_path:
         gps_gpx = read_gpx_file(gpx_path)
@@ -608,19 +719,29 @@ def run_pipeline(
 
     fb = read_feedback(db_path, run_id=run_id)
 
-    feedback_geo = pd.merge_asof(
-        fb.sort_values("Timestamp"),
-        gps.sort_values("Timestamp"),
-        on="Timestamp", direction="nearest",
-        tolerance=pd.Timedelta(milliseconds=cfg.merge_tolerance_ms)
-    ).dropna(subset=["latitude","longitude"]).reset_index(drop=True)
+    feedback_geo = (
+        pd.merge_asof(
+            fb.sort_values("Timestamp"),
+            gps.sort_values("Timestamp"),
+            on="Timestamp",
+            direction="nearest",
+            tolerance=pd.Timedelta(milliseconds=cfg.merge_tolerance_ms),
+        )
+        .dropna(subset=["latitude", "longitude"])
+        .reset_index(drop=True)
+    )
 
-    merged = pd.merge_asof(
-        df_gsr.sort_values("Timestamp"),
-        gps.sort_values("Timestamp"),
-        on="Timestamp", direction="nearest",
-        tolerance=pd.Timedelta(milliseconds=cfg.merge_tolerance_ms)
-    ).dropna(subset=["latitude","longitude"]).reset_index(drop=True)
+    merged = (
+        pd.merge_asof(
+            df_gsr.sort_values("Timestamp"),
+            gps.sort_values("Timestamp"),
+            on="Timestamp",
+            direction="nearest",
+            tolerance=pd.Timedelta(milliseconds=cfg.merge_tolerance_ms),
+        )
+        .dropna(subset=["latitude", "longitude"])
+        .reset_index(drop=True)
+    )
 
     # Exports
     label = f"{cfg.output_prefix}_run{_safe_slug(run_id)}"
@@ -631,18 +752,31 @@ def run_pipeline(
 
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_all = os.path.join(out_csv_dir, f"output_GSR_GPS_{label}_{time_str}.csv")
-    out_peaks = os.path.join(out_csv_dir, f"output_GSR_GPS_SCRonly_{label}_{time_str}.csv")
-    out_events = os.path.join(out_csv_dir, f"output_Feedback_to_SCR_{label}_{time_str}.csv")
+    out_peaks = os.path.join(
+        out_csv_dir, f"output_GSR_GPS_SCRonly_{label}_{time_str}.csv"
+    )
+    out_events = os.path.join(
+        out_csv_dir, f"output_Feedback_to_SCR_{label}_{time_str}.csv"
+    )
 
     merged.to_csv(out_all, index=False)
-    merged[merged["SCR_Peak"]==1].to_csv(out_peaks, index=False)
+    merged[merged["SCR_Peak"] == 1].to_csv(out_peaks, index=False)
     feedback_geo.to_csv(out_events, index=False)
 
     kml_paths = export_kml_kmz(merged, out_kml_dir, label)
-    plot_path = plot_summary(df_gsr, merged, feedback_geo, out_plot_dir, title=f"GSR/GPS – {label} (gps={gps_used})")
+    plot_path = plot_summary(
+        df_gsr,
+        merged,
+        feedback_geo,
+        out_plot_dir,
+        title=f"GSR/GPS – {label} (gps={gps_used})",
+    )
 
     zip_path = os.path.join(out_dir, f"outputs_{label}_{time_str}.zip")
-    zip_outputs([out_all, out_peaks, out_events, plot_path, kml_paths["kml"], kml_paths["kmz"]], zip_path)
+    zip_outputs(
+        [out_all, out_peaks, out_events, plot_path, kml_paths["kml"], kml_paths["kmz"]],
+        zip_path,
+    )
 
     return {
         "gps_used": gps_used,
@@ -654,7 +788,7 @@ def run_pipeline(
             "kml": kml_paths["kml"],
             "kmz": kml_paths["kmz"],
             "zip": zip_path,
-        }
+        },
     }
 
 
@@ -670,10 +804,29 @@ def detect_shimmer_columns(csv_path: str) -> tuple[list[str], list[str]]:
     cols = list(df.columns)
     ts_cands = try_pick_by_substring(cols, ["timestamp"])
     # prefer unix/cal
-    ts_cands = sorted(ts_cands, key=lambda c: (0 if "unix" in c.lower() else 1, 0 if "cal" in c.lower() else 1, len(c)))
-    gsr_cands = try_pick_by_substring(cols, ["gsr"]) or try_pick_by_substring(cols, ["conductance"]) or try_pick_by_substring(cols, ["skin", "conduct"])
-    gsr_cands = sorted(gsr_cands, key=lambda c: (0 if "conduct" in c.lower() else 1, 0 if "cal" in c.lower() else 1, len(c)))
+    ts_cands = sorted(
+        ts_cands,
+        key=lambda c: (
+            0 if "unix" in c.lower() else 1,
+            0 if "cal" in c.lower() else 1,
+            len(c),
+        ),
+    )
+    gsr_cands = (
+        try_pick_by_substring(cols, ["gsr"])
+        or try_pick_by_substring(cols, ["conductance"])
+        or try_pick_by_substring(cols, ["skin", "conduct"])
+    )
+    gsr_cands = sorted(
+        gsr_cands,
+        key=lambda c: (
+            0 if "conduct" in c.lower() else 1,
+            0 if "cal" in c.lower() else 1,
+            len(c),
+        ),
+    )
     return ts_cands, gsr_cands
+
 
 def zip_outputs(paths: list[str], zip_path: str) -> str:
     from zipfile import ZipFile
