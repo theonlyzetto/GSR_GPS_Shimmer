@@ -410,38 +410,93 @@ def export_kml_kmz(merged: pd.DataFrame, out_dir: str, label: str) -> dict:
 
     return {"kml": kml_filename, "kmz": kmz_filename}
 
-def plot_summary(df_gsr: pd.DataFrame, merged: pd.DataFrame, feedback_geo: pd.DataFrame, out_dir: str, title: str) -> str:
+def plot_summary(
+    df_gsr: pd.DataFrame,
+    merged: pd.DataFrame,
+    feedback_geo: pd.DataFrame,
+    out_dir: str,
+    title: str,
+    cfg: PipelineConfig | None = None,
+) -> str:
     os.makedirs(out_dir, exist_ok=True)
 
-    # --- 3 Panel Layout: Signal / Map / Histogram ---
-    fig = plt.figure(figsize=(14, 11))
-    gs = fig.add_gridspec(3, 1, height_ratios=[2, 1, 0.8])
-    ax1, ax2, ax3 = gs.subplots()
+    fig = plt.figure(figsize=(14, 10))
+    gs = fig.add_gridspec(2, 1, height_ratios=[2, 1])
+    ax1, ax2 = gs.subplots()
 
+    # ---------- Titel (oben mittig) ----------
     fig.suptitle(title, fontsize=14)
 
-    # ---------------- Signal ----------------
+    # ---------- Signal ----------
     ax1.plot(df_gsr["Timestamp"], df_gsr["Conductance"], label="Conductance", alpha=0.9)
+
     if "SCL_Global" in df_gsr.columns:
-        ax1.plot(df_gsr["Timestamp"], df_gsr["SCL_Global"], label="SCL Global", linewidth=1.3)
+        ax1.plot(df_gsr["Timestamp"], df_gsr["SCL_Global"], label="SCL 0.002 Hz", linewidth=1.3)
     if "SCL_Baseline" in df_gsr.columns:
-        ax1.plot(df_gsr["Timestamp"], df_gsr["SCL_Baseline"], label="SCL Baseline", linewidth=1.3)
+        ax1.plot(df_gsr["Timestamp"], df_gsr["SCL_Baseline"], label="Baseline 0.001 Hz", linewidth=1.3)
 
-    if "Trigger" in df_gsr.columns:
-        trigs = df_gsr[df_gsr["Trigger"] == 1]
-        if not trigs.empty:
-            ax1.scatter(trigs["Timestamp"], trigs["Conductance"], marker="*", s=90, color="red", label="Trigger")
+    trigs = df_gsr[df_gsr.get("Trigger", 0) == 1]
+    peaks = df_gsr[df_gsr.get("SCR_Peak", 0) == 1]
 
-    if "SCR_Peak" in df_gsr.columns:
-        peaks = df_gsr[df_gsr["SCR_Peak"] == 1]
-        if not peaks.empty:
-            ax1.scatter(peaks["Timestamp"], peaks["Conductance"], marker="^", s=60, color="orange", label="SCR Peak")
+    if not trigs.empty:
+        ax1.scatter(trigs["Timestamp"], trigs["Conductance"], marker="v", s=70, color="orange", label="Trigger")
+    if not peaks.empty:
+        ax1.scatter(peaks["Timestamp"], peaks["Conductance"], marker="o", s=45, facecolor="salmon",
+                    edgecolor="firebrick", label="SCR Peak")
 
-    ax1.set_ylabel("Conductance (µS)")
-    ax1.grid(alpha=0.3)
-    ax1.legend()
+    ax1.set_ylabel("Conductance (uS)")
+    ax1.grid(alpha=0.25)
+    ax1.legend(loc="lower left", fontsize=9)
 
-    # ---------------- Map (EPSG:3857 + Basemap) ----------------
+    # ---------- Info-Box oben rechts ----------
+    # Counts
+    n_events = 0 if feedback_geo is None else int(len(feedback_geo))
+    n_trigs = int(trigs.shape[0])
+    n_peaks = int(peaks.shape[0])
+
+    # Optional: Tonic-Block (wenn Baseline vorhanden)
+    tonic_text = ""
+    if "SCL_Baseline" in df_gsr.columns and not df_gsr["SCL_Baseline"].isna().all():
+        tonic_start = float(df_gsr["SCL_Baseline"].iloc[0])
+        tonic_end = float(df_gsr["SCL_Baseline"].iloc[-1])
+        d_tonic = tonic_end - tonic_start
+        minutes = max(1e-9, (df_gsr["Timestamp"].iloc[-1] - df_gsr["Timestamp"].iloc[0]).total_seconds() / 60.0)
+        slope_per_min = d_tonic / minutes
+        tonic_text = (
+            f"TonicStart={tonic_start:.3f}\n"
+            f"TonicEnd={tonic_end:.3f}\n"
+            f"ΔTonic={d_tonic:+.3f} ({(d_tonic/tonic_start*100 if tonic_start else 0):+.1f}%)\n"
+            f"Slope={slope_per_min:+.4f} uS/min\n"
+        )
+
+    # Config-Text (falls cfg übergeben)
+    cfg_text = ""
+    if cfg is not None:
+        cfg_text = (
+            f"scr_offset={getattr(cfg,'scr_offset_us',None)}\n"
+            f"min_peak_distance_s={getattr(cfg,'min_peak_distance_s',None)}\n"
+            f"sampling_hz={getattr(cfg,'resample_hz',None)}\n"
+            f"min_prominence_us={getattr(cfg,'min_peak_prominence_us',None)}\n"
+            f"stimulus_window_s={getattr(cfg,'stimulus_window_s',None)}\n"
+            f"scl_base={getattr(cfg,'scl_baseline_cutoff_hz',None)}Hz\n"
+            f"scl_global={getattr(cfg,'scl_global_cutoff_hz',None)}Hz\n"
+        )
+
+    info = (
+        f"{cfg_text}"
+        f"\nEvents={n_events} | Triggers={n_trigs} | Peaks={n_peaks}\n"
+        f"{tonic_text}"
+    ).strip()
+
+    ax1.text(
+        0.995, 0.995, info,
+        transform=ax1.transAxes,
+        ha="right", va="top",
+        fontsize=9,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.85)
+    )
+
+    # ---------- Map (EPSG:3857 + Basemap) ----------
     from pyproj import Transformer
     transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
@@ -450,80 +505,48 @@ def plot_summary(df_gsr: pd.DataFrame, merged: pd.DataFrame, feedback_geo: pd.Da
         return xs, ys
 
     # Track
-    if {"longitude", "latitude"}.issubset(merged.columns) and not merged.empty:
-        m = merged.dropna(subset=["longitude", "latitude"]).copy()
-        x_all, y_all = lonlat_to_xy(m)
-        ax2.scatter(x_all, y_all, s=8, alpha=0.7, color="blue", label="Track")
+    m = merged.dropna(subset=["longitude", "latitude"]).copy()
+    x_all, y_all = lonlat_to_xy(m)
+    ax2.plot(x_all, y_all, linewidth=3, alpha=0.85, color="black", label="GPS Track")
 
-        # Peaks / Trigger auf der Karte aus merged filtern
-        if "SCR_Peak" in m.columns:
-            m_peaks = m[m["SCR_Peak"] == 1]
-            if not m_peaks.empty:
-                x_p, y_p = lonlat_to_xy(m_peaks)
-                ax2.scatter(x_p, y_p, s=70, color="orange", marker="^", label="SCR Peaks")
+    # Trigger (aus merged)
+    if "Trigger" in m.columns:
+        m_tr = m[m["Trigger"] == 1]
+        if not m_tr.empty:
+            x_t, y_t = lonlat_to_xy(m_tr)
+            ax2.scatter(x_t, y_t, s=80, marker="v", color="orange", label="Trigger")
 
-        if "Trigger" in m.columns:
-            m_trigs = m[m["Trigger"] == 1]
-            if not m_trigs.empty:
-                x_t, y_t = lonlat_to_xy(m_trigs)
-                ax2.scatter(x_t, y_t, s=90, color="red", marker="*", label="Trigger")
+    # Peaks (aus merged)
+    if "SCR_Peak" in m.columns:
+        m_pk = m[m["SCR_Peak"] == 1]
+        if not m_pk.empty:
+            x_p, y_p = lonlat_to_xy(m_pk)
+            ax2.scatter(x_p, y_p, s=60, marker="o", facecolor="salmon", edgecolor="firebrick", label="SCR Peak")
 
     # Events
     if feedback_geo is not None and not feedback_geo.empty and {"longitude", "latitude"}.issubset(feedback_geo.columns):
         fbg = feedback_geo.dropna(subset=["longitude", "latitude"]).copy()
         x_e, y_e = lonlat_to_xy(fbg)
-        ax2.scatter(x_e, y_e, s=70, color="gold", marker="o", label="Event")
+        ax2.scatter(x_e, y_e, s=70, marker="o", color="gold", label="Event")
 
-    # Basemap (optional)
+    # Basemap
     try:
         import contextily as ctx
         ctx.add_basemap(ax2, source=ctx.providers.OpenStreetMap.Mapnik, alpha=0.85)
     except Exception as e:
         print(f"⚠️ Basemap fehlgeschlagen: {e}")
 
-    ax2.set_title("GPS-Track (● Events, ★ Trigger, ▲ Peaks)")
+    ax2.set_title("GPS Track (Events, Triggers, Peaks)")
     ax2.set_xlabel("X (EPSG:3857)")
     ax2.set_ylabel("Y (EPSG:3857)")
-    ax2.grid(alpha=0.2)
-    ax2.legend(fontsize=9)
-
-    # ---------------- Histogram ----------------
-    latencies = pd.Series(dtype=float)
-    if "SCR_Latency_s" in df_gsr.columns:
-        latencies = df_gsr["SCR_Latency_s"].dropna()
-
-    ax3.set_title("Histogramm der SCR-Latenzen (Trigger → Peak)")
-    if not latencies.empty:
-        ax3.hist(latencies, bins=np.arange(0, 10, 0.5), edgecolor="k")
-        txt = (
-            f"n={len(latencies)}\n"
-            f"mean={latencies.mean():.2f}s\n"
-            f"median={latencies.median():.2f}s\n"
-            f"std={latencies.std():.2f}s"
-        )
-        ax3.text(
-            0.98, 0.95, txt, transform=ax3.transAxes, ha="right", va="top",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8)
-        )
-    ax3.set_xlabel("Latenz (Sekunden)")
-    ax3.set_ylabel("Anzahl")
-    ax3.grid(alpha=0.3)
+    ax2.grid(alpha=0.15)
+    ax2.legend(loc="upper right", fontsize=9)
 
     out_png = os.path.join(out_dir, f"plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
     plt.tight_layout()
     plt.savefig(out_png, dpi=180)
     plt.close()
     return out_png
-
-def zip_outputs(paths: list[str], zip_path: str) -> str:
-    from zipfile import ZipFile
-    import os
-
-    with ZipFile(zip_path, "w") as z:
-        for p in paths:
-            if p and os.path.exists(p):
-                z.write(p, arcname=os.path.basename(p))
-    return zip_path
 
 # -------------------- High-level run --------------------
 
