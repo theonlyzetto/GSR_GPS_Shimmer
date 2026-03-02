@@ -218,10 +218,9 @@ def build_run_items(
         }
         it["overlap_s"] = overlap_s(gsr_min, gsr_max, it["start"], it["end"])
         it["display"] = (
-            f"{it['study']} | {it['name']} | run_id={it['run_id']} | {it['start']} -> {it['end']} | overlap={int(it['overlap_s'])}s".strip(
-                " |"
-            )
-        )
+            f"{it['overlap_s']:.3f}sS | {it['study']} | {it['name']} | run_id={it['run_id']} | "
+            f"{it['start']} -> {it['end']}"
+        ).strip(" |")
         items.append(it)
 
     items = sorted(items, key=lambda x: x["overlap_s"], reverse=True)
@@ -486,20 +485,16 @@ def plot_summary(
     # ---------- Signal ----------
     ax1.plot(df_gsr["Timestamp"], df_gsr["Conductance"], label="Conductance", alpha=0.9)
 
+    sclg = getattr(cfg, "scl_global_cutoff_hz", None) if cfg else None
+    sclb = getattr(cfg, "scl_baseline_cutoff_hz", None) if cfg else None
+
     if "SCL_Global" in df_gsr.columns:
-        ax1.plot(
-            df_gsr["Timestamp"],
-            df_gsr["SCL_Global"],
-            label="SCL 0.002 Hz",
-            linewidth=1.3,
-        )
+        lbl = f"SCL Global ({sclg} Hz)" if sclg is not None else "SCL Global"
+        ax1.plot(df_gsr["Timestamp"], df_gsr["SCL_Global"], label=lbl, linewidth=1.3)
+
     if "SCL_Baseline" in df_gsr.columns:
-        ax1.plot(
-            df_gsr["Timestamp"],
-            df_gsr["SCL_Baseline"],
-            label="Baseline 0.001 Hz",
-            linewidth=1.3,
-        )
+        lbl = f"Baseline ({sclb} Hz)" if sclb is not None else "Baseline"
+        ax1.plot(df_gsr["Timestamp"], df_gsr["SCL_Baseline"], label=lbl, linewidth=1.3)
 
     trigs = df_gsr[df_gsr.get("Trigger", 0) == 1]
     peaks = df_gsr[df_gsr.get("SCR_Peak", 0) == 1]
@@ -529,12 +524,11 @@ def plot_summary(
     ax1.legend(loc="lower left", fontsize=9)
 
     # ---------- Info-Box oben rechts ----------
-    # Counts
+
     n_events = 0 if feedback_geo is None else int(len(feedback_geo))
     n_trigs = int(trigs.shape[0])
     n_peaks = int(peaks.shape[0])
 
-    # Optional: Tonic-Block (wenn Baseline vorhanden)
     tonic_text = ""
     if "SCL_Baseline" in df_gsr.columns and not df_gsr["SCL_Baseline"].isna().all():
         tonic_start = float(df_gsr["SCL_Baseline"].iloc[0])
@@ -549,26 +543,22 @@ def plot_summary(
         tonic_text = (
             f"TonicStart={tonic_start:.3f}\n"
             f"TonicEnd={tonic_end:.3f}\n"
-            f"ΔTonic={d_tonic:+.3f} ({(d_tonic/tonic_start*100 if tonic_start else 0):+.1f}%)\n"
+            f"ΔTonic={d_tonic:+.3f}\n"
             f"Slope={slope_per_min:+.4f} uS/min\n"
         )
 
-    # Config-Text (falls cfg übergeben)
     cfg_text = ""
     if cfg is not None:
         cfg_text = (
-            f"scr_offset={getattr(cfg,'scr_offset_us',None)}\n"
-            f"min_peak_distance_s={getattr(cfg,'min_peak_distance_s',None)}\n"
-            f"sampling_hz={getattr(cfg,'resample_hz',None)}\n"
-            f"min_prominence_us={getattr(cfg,'min_peak_prominence_us',None)}\n"
-            f"stimulus_window_s={getattr(cfg,'stimulus_window_s',None)}\n"
-            f"scl_base={getattr(cfg,'scl_baseline_cutoff_hz',None)}Hz\n"
-            f"scl_global={getattr(cfg,'scl_global_cutoff_hz',None)}Hz\n"
+            f"scr_offset={cfg.scr_offset}\n"
+            f"min_peak_distance_s={cfg.min_peak_distance_s}\n"
+            f"sampling_hz={cfg.sampling_rate_hz}\n"
+            f"stimulus_window_s={cfg.stimulus_window_s}\n"
         )
 
     info = (
-        f"{cfg_text}"
-        f"\nEvents={n_events} | Triggers={n_trigs} | Peaks={n_peaks}\n"
+        f"{cfg_text}\n"
+        f"Events={n_events} | Triggers={n_trigs} | Peaks={n_peaks}\n"
         f"{tonic_text}"
     ).strip()
 
@@ -581,6 +571,7 @@ def plot_summary(
         va="top",
         fontsize=9,
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.85),
+        zorder=10,
     )
 
     # ---------- Map (EPSG:3857 + Basemap) ----------
@@ -763,16 +754,25 @@ def run_pipeline(
     feedback_geo.to_csv(out_events, index=False)
 
     kml_paths = export_kml_kmz(merged, out_kml_dir, label)
-    study = (
-        str(run_meta.get("study", "NA"))
-        if "run_meta" in locals() and isinstance(run_meta, dict)
-        else "NA"
-    )
-    name = (
-        str(run_meta.get("name", "NA"))
-        if "run_meta" in locals() and isinstance(run_meta, dict)
-        else "NA"
-    )
+    # Default, damit plot_title immer existiert
+    plot_title = f"GSR/GPS – {label} (gps={gps_used})"
+
+    # ---------------- Plot Title aus DB ----------------
+    study = "NA"
+    name = "NA"
+
+    if run_id is not None:
+        try:
+            runs_df = list_runs(db_path)
+            sel = runs_df[runs_df["id"].astype(str) == str(run_id)]
+            if not sel.empty:
+                r0 = sel.iloc[0]
+                if pd.notna(r0.get("study")):
+                    study = str(r0.get("study"))
+                if pd.notna(r0.get("name")):
+                    name = str(r0.get("name"))
+        except Exception:
+            pass
 
     plot_title = (
         f"{study} | {name} | run{run_id} | {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -812,7 +812,7 @@ def detect_shimmer_columns(csv_path: str) -> tuple[list[str], list[str]]:
     Returns (timestamp_candidates, conductance_candidates)
     """
     try:
-        df = pd.read_csv(csv_path, sep="\\t", header=1, skiprows=[2], nrows=5)
+        df = pd.read_csv(csv_path, sep="\t", header=1, skiprows=[2], nrows=5)
     except Exception:
         df = pd.read_csv(csv_path, nrows=5)
 
