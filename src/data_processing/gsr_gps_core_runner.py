@@ -651,3 +651,13 @@ def detect_shimmer_columns(csv_path: str) -> tuple[list[str], list[str]]:
     gsr_cands = try_pick_by_substring(cols, ["gsr"]) or try_pick_by_substring(cols, ["conductance"]) or try_pick_by_substring(cols, ["skin", "conduct"])
     gsr_cands = sorted(gsr_cands, key=lambda c: (0 if "conduct" in c.lower() else 1, 0 if "cal" in c.lower() else 1, len(c)))
     return ts_cands, gsr_cands
+
+def zip_outputs(paths: list[str], zip_path: str) -> str:
+    from zipfile import ZipFile
+    import os
+
+    with ZipFile(zip_path, "w") as z:
+        for p in paths:
+            if p and os.path.exists(p):
+                z.write(p, arcname=os.path.basename(p))
+    return zip_path
