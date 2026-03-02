@@ -435,27 +435,69 @@ def plot_summary(df_gsr: pd.DataFrame, merged: pd.DataFrame, feedback_geo: pd.Da
     ax1.grid(alpha=0.3)
     ax1.legend()
 
-    # Map scatter
-    ax2.scatter(merged["longitude"], merged["latitude"], s=6, alpha=0.6, label="Track")
-    if not feedback_geo.empty:
-        ax2.scatter(feedback_geo["longitude"], feedback_geo["latitude"], s=40, marker="o", label="Feedback")
-    ax2.set_xlabel("Longitude")
-    ax2.set_ylabel("Latitude")
-    ax2.legend()
-    ax2.grid(alpha=0.2)
+    from pyproj import Transformer
 
-    out_png = os.path.join(out_dir, f"plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=180)
-    plt.close()
-    return out_png
+    # lon/lat -> WebMercator
+    to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
-def zip_outputs(paths: list[str], zip_path: str) -> str:
+    def lonlat_to_xy(df):
+    xs, ys = to_3857.transform(df["longitude"].to_numpy(), df["latitude"].to_numpy())
+    return xs, ys
+
+    # Track
+    x_all, y_all = lonlat_to_xy(merged)
+    ax2.scatter(x_all, y_all, s=8, c="blue", label="Track")
+
+    # Peaks
+    if not peaks_geo.empty:
+    x_p, y_p = lonlat_to_xy(peaks_geo)
+    ax2.scatter(x_p, y_p, s=70, color="orange", marker="^", label="SCR Peaks")
+
+    # Trigger
+    if not trigs_geo.empty:
+    x_t, y_t = lonlat_to_xy(trigs_geo)
+    ax2.scatter(x_t, y_t, s=90, color="red", marker="*", label="Trigger")
+
+    # Events (falls du feedback_geo hast)
+    if feedback_geo is not None and not feedback_geo.empty:
+    x_e, y_e = lonlat_to_xy(feedback_geo)
+    ax2.scatter(x_e, y_e, s=70, color="gold", marker="o", label="Event")
+
+    # Basemap
+    try:
+    import contextily as ctx
+    ctx.add_basemap(ax2, source=ctx.providers.OpenStreetMap.Mapnik, alpha=0.85)
+    except Exception as e:
+    print(f"⚠️ Basemap fehlgeschlagen: {e}")
+
+    ax2.set_xlabel("X (EPSG:3857)")
+    ax2.set_ylabel("Y (EPSG:3857)")
+    ax2.legend(fontsize=9)
+    def zip_outputs(paths: list[str], zip_path: str) -> str:
     with ZipFile(zip_path, "w") as z:
         for p in paths:
             if p and os.path.exists(p):
                 z.write(p, arcname=os.path.basename(p))
     return zip_path
+
+latencies = merged["SCR_Latency_s"].dropna() if "SCR_Latency_s" in merged.columns else pd.Series(dtype=float)
+
+ax3.set_title("Histogramm der SCR-Latenzen (Trigger → Peak)")
+if not latencies.empty:
+    ax3.hist(latencies, bins=np.arange(0, 10, 0.5), edgecolor="k")
+ax3.set_xlabel("Latenz (Sekunden)")
+ax3.set_ylabel("Anzahl")
+ax3.grid(alpha=0.3)
+
+if not latencies.empty:
+    txt = (
+        f"n={len(latencies)}\n"
+        f"mean={latencies.mean():.2f}s\n"
+        f"median={latencies.median():.2f}s\n"
+        f"std={latencies.std():.2f}s"
+    )
+    ax3.text(0.98, 0.95, txt, transform=ax3.transAxes, ha="right", va="top",
+             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
 
 
 # -------------------- High-level run --------------------
