@@ -733,29 +733,63 @@ def run_pipeline(
         .reset_index(drop=True)
     )
 
-    # Exports
-    label = f"{cfg.output_prefix}_run{_safe_slug(run_id)}"
-    out_csv_dir = os.path.join(out_dir, "csv")
-    out_plot_dir = os.path.join(out_dir, "plots")
-    out_kml_dir = os.path.join(out_dir, "kml")
+    # -------------------- Exports (CSVs) --------------------
     os.makedirs(out_csv_dir, exist_ok=True)
 
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     out_all = os.path.join(out_csv_dir, f"output_GSR_GPS_{label}_{time_str}.csv")
-    out_peaks = os.path.join(
+    out_scronly = os.path.join(
         out_csv_dir, f"output_GSR_GPS_SCRonly_{label}_{time_str}.csv"
+    )  # Peaks + Trigger
+    out_peaks = os.path.join(
+        out_csv_dir, f"output_GSR_GPS_Peaks_{label}_{time_str}.csv"
+    )
+    out_trigs = os.path.join(
+        out_csv_dir, f"output_GSR_GPS_Triggers_{label}_{time_str}.csv"
     )
     out_events = os.path.join(
         out_csv_dir, f"output_Feedback_to_SCR_{label}_{time_str}.csv"
     )
 
+    # Full merged export
     merged.to_csv(out_all, index=False)
-    merged[merged["SCR_Peak"] == 1].to_csv(out_peaks, index=False)
-    feedback_geo.to_csv(out_events, index=False)
 
-    kml_paths = export_kml_kmz(merged, out_kml_dir, label)
-    # Default, damit plot_title immer existiert
-    plot_title = f"GSR/GPS – {label} (gps={gps_used})"
+    # Peaks (only)
+    if "SCR_Peak" in merged.columns:
+        merged.loc[merged["SCR_Peak"] == 1].to_csv(out_peaks, index=False)
+    else:
+        # write empty file with header to keep predictable outputs (optional)
+        merged.iloc[0:0].to_csv(out_peaks, index=False)
+
+    # Triggers (only)
+    if "Trigger" in merged.columns:
+        merged.loc[merged["Trigger"] == 1].to_csv(out_trigs, index=False)
+    else:
+        merged.iloc[0:0].to_csv(out_trigs, index=False)
+
+    # SCRonly = Peaks OR Trigger
+    if ("SCR_Peak" in merged.columns) and ("Trigger" in merged.columns):
+        scronly = merged.loc[
+            (merged["SCR_Peak"] == 1) | (merged["Trigger"] == 1)
+        ].copy()
+    elif "SCR_Peak" in merged.columns:
+        scronly = merged.loc[merged["SCR_Peak"] == 1].copy()
+    elif "Trigger" in merged.columns:
+        scronly = merged.loc[merged["Trigger"] == 1].copy()
+    else:
+        scronly = merged.iloc[0:0].copy()
+
+    scronly.to_csv(out_scronly, index=False)
+
+    # Events
+    if feedback_geo is not None and not feedback_geo.empty:
+        feedback_geo.to_csv(out_events, index=False)
+    else:
+        # empty file with header (optional)
+        pd.DataFrame(
+            columns=["Timestamp", "feeling", "note", "latitude", "longitude"]
+        ).to_csv(out_events, index=False)
 
     # ---------------- Plot Title aus DB ----------------
     study = "NA"
@@ -789,7 +823,16 @@ def run_pipeline(
 
     zip_path = os.path.join(out_dir, f"outputs_{label}_{time_str}.zip")
     zip_outputs(
-        [out_all, out_peaks, out_events, plot_path, kml_paths["kml"], kml_paths["kmz"]],
+        [
+            out_all,
+            out_scronly,
+            out_peaks,
+            out_trigs,
+            out_events,
+            plot_path,
+            kml_paths["kml"],
+            kml_paths["kmz"],
+        ],
         zip_path,
     )
 
