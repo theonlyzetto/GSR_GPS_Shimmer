@@ -132,33 +132,79 @@ with tempfile.TemporaryDirectory() as tmpdir:
                 shimmer_gsr_col=gsr_col,
             )
 
-        st.success("✅ Fertig!")
         st.write(f"GPS-Quelle: **{res['gps_used']}**")
 
-        outputs = res["outputs"]
-        st.subheader("Download")
-        zip_bytes = Path(outputs["zip"]).read_bytes()
-        st.download_button(
-            "⬇️ Alle Outputs als ZIP",
-            data=zip_bytes,
-            file_name=Path(outputs["zip"]).name,
-            mime="application/zip",
-        )
+        out = res["outputs"]
+        st.success("Fertig!")
 
-        st.caption("Einzeldateien:")
-        cols = st.columns(3)
+        # ---------- Preview: Plot + Map (PNG) ----------
+        plot_png = out.get("plot_png")
+        if plot_png and Path(plot_png).exists():
+            st.subheader("Plot + Map")
+            st.image(str(plot_png), use_container_width=True)
+        else:
+            st.warning("Plot PNG nicht gefunden.")
 
-        def dl(i, label, key, mime):
-            p = Path(outputs[key])
-            cols[i].download_button(
-                label, data=p.read_bytes(), file_name=p.name, mime=mime
-            )
+        st.subheader("Downloads")
 
-        dl(0, "CSV merged", "csv_all", "text/csv")
-        dl(0, "CSV peaks", "csv_peaks", "text/csv")
-        dl(1, "CSV events", "csv_events", "text/csv")
-        dl(1, "Plot PNG", "plot_png", "image/png")
-        dl(2, "KML", "kml", "application/vnd.google-earth.kml+xml")
-        dl(2, "KMZ", "kmz", "application/vnd.google-earth.kmz")
+        # ZIP (alles)
+        if out.get("zip"):
+            with open(out["zip"], "rb") as f:
+                st.download_button(
+                    "Download ZIP (alle Outputs)",
+                    data=f,
+                    file_name=Path(out["zip"]).name,
+                    mime="application/zip",
+                )
 
-        st.image(outputs["plot_png"], caption="Plot", use_container_width=True)
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            if out.get("csv_all"):
+                with open(out["csv_all"], "rb") as f:
+                    st.download_button(
+                        "CSV: All (merged)",
+                        data=f,
+                        file_name=Path(out["csv_all"]).name,
+                        mime="text/csv",
+                    )
+
+        with c2:
+            if out.get("csv_scronly"):
+                with open(out["csv_scronly"], "rb") as f:
+                    st.download_button(
+                        "CSV: SCRonly (Peaks + Trigger)",
+                        data=f,
+                        file_name=Path(out["csv_scronly"]).name,
+                        mime="text/csv",
+                    )
+
+        with c3:
+            if out.get("csv_triggers"):
+                with open(out["csv_triggers"], "rb") as f:
+                    st.download_button(
+                        "CSV: Trigger (only)",
+                        data=f,
+                        file_name=Path(out["csv_triggers"]).name,
+                        mime="text/csv",
+                    )
+
+        # Events optional
+        if out.get("csv_events"):
+            with open(out["csv_events"], "rb") as f:
+                st.download_button(
+                    "CSV: Events (Feedback)",
+                    data=f,
+                    file_name=Path(out["csv_events"]).name,
+                    mime="text/csv",
+                )
+
+        # Plot optional
+        if out.get("plot_png"):
+            with open(out["plot_png"], "rb") as f:
+                st.download_button(
+                    "Plot PNG",
+                    data=f,
+                    file_name=Path(out["plot_png"]).name,
+                    mime="image/png",
+                )

@@ -732,16 +732,39 @@ def run_pipeline(
         .dropna(subset=["latitude", "longitude"])
         .reset_index(drop=True)
     )
+    # ---------------- study/name for labels/titles ----------------
+    study = "NA"
+    name = "NA"
+    if run_id and "runs" in locals() and col_id:
+        try:
+            rr = runs[runs[col_id].astype(str) == str(run_id)]
+            if not rr.empty:
+                r0 = rr.iloc[0]
+                if "study" in runs.columns and pd.notna(r0.get("study")):
+                    study = str(r0.get("study"))
+                if "name" in runs.columns and pd.notna(r0.get("name")):
+                    name = str(r0.get("name"))
+        except Exception:
+            pass
 
     # -------------------- Exports (CSVs) --------------------
+    out_csv_dir = os.path.join(out_dir, "csv")
     os.makedirs(out_csv_dir, exist_ok=True)
+
+    safe_study = str(study).replace(" ", "_")
+    safe_name = str(name).replace(" ", "_")
+    label = (
+        f"{safe_study}_{safe_name}_run{run_id}"
+        if run_id is not None
+        else f"{safe_study}_{safe_name}_NA"
+    )
 
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     out_all = os.path.join(out_csv_dir, f"output_GSR_GPS_{label}_{time_str}.csv")
     out_scronly = os.path.join(
         out_csv_dir, f"output_GSR_GPS_SCRonly_{label}_{time_str}.csv"
-    )  # Peaks + Trigger
+    )
     out_peaks = os.path.join(
         out_csv_dir, f"output_GSR_GPS_Peaks_{label}_{time_str}.csv"
     )
@@ -752,14 +775,12 @@ def run_pipeline(
         out_csv_dir, f"output_Feedback_to_SCR_{label}_{time_str}.csv"
     )
 
-    # Full merged export
     merged.to_csv(out_all, index=False)
 
     # Peaks (only)
     if "SCR_Peak" in merged.columns:
         merged.loc[merged["SCR_Peak"] == 1].to_csv(out_peaks, index=False)
     else:
-        # write empty file with header to keep predictable outputs (optional)
         merged.iloc[0:0].to_csv(out_peaks, index=False)
 
     # Triggers (only)
@@ -786,65 +807,51 @@ def run_pipeline(
     if feedback_geo is not None and not feedback_geo.empty:
         feedback_geo.to_csv(out_events, index=False)
     else:
-        # empty file with header (optional)
         pd.DataFrame(
             columns=["Timestamp", "feeling", "note", "latitude", "longitude"]
         ).to_csv(out_events, index=False)
 
-    # ---------------- Plot Title aus DB ----------------
-    study = "NA"
-    name = "NA"
-
-    if run_id is not None:
-        try:
-            runs_df = list_runs(db_path)
-            sel = runs_df[runs_df["id"].astype(str) == str(run_id)]
-            if not sel.empty:
-                r0 = sel.iloc[0]
-                if pd.notna(r0.get("study")):
-                    study = str(r0.get("study"))
-                if pd.notna(r0.get("name")):
-                    name = str(r0.get("name"))
-        except Exception:
-            pass
+    # -------------------- Plot directory + title --------------------
+    out_plot_dir = os.path.join(out_dir, "plots")
+    os.makedirs(out_plot_dir, exist_ok=True)
 
     plot_title = (
         f"{study} | {name} | run{run_id} | {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     )
-
     plot_path = plot_summary(
-        df_gsr,
-        merged,
-        feedback_geo,
-        out_plot_dir,
-        title=plot_title,
-        cfg=cfg,
+        df_gsr, merged, feedback_geo, out_plot_dir, title=plot_title, cfg=cfg
     )
 
+    # -------------------- KML export (optional, robust) --------------------
+    kml_paths: dict = {}
+    try:
+        out_kml_dir = os.path.join(out_dir, "kml")
+        os.makedirs(out_kml_dir, exist_ok=True)
+        kml_paths = export_kml_kmz(merged, out_kml_dir, label) or {}
+    except Exception:
+        kml_paths = {}
+
+    # -------------------- ZIP --------------------
     zip_path = os.path.join(out_dir, f"outputs_{label}_{time_str}.zip")
-    zip_outputs(
-        [
-            out_all,
-            out_scronly,
-            out_peaks,
-            out_trigs,
-            out_events,
-            plot_path,
-            kml_paths["kml"],
-            kml_paths["kmz"],
-        ],
-        zip_path,
-    )
+    paths = [out_all, out_scronly, out_peaks, out_trigs, out_events, plot_path]
+    if kml_paths.get("kml"):
+        paths.append(kml_paths.get("kml"))
+    if kml_paths.get("kmz"):
+        paths.append(kml_paths.get("kmz"))
+
+    zip_path = zip_outputs(paths, zip_path)
 
     return {
         "gps_used": gps_used,
         "outputs": {
             "csv_all": out_all,
+            "csv_scronly": out_scronly,
             "csv_peaks": out_peaks,
+            "csv_triggers": out_trigs,
             "csv_events": out_events,
             "plot_png": plot_path,
-            "kml": kml_paths["kml"],
-            "kmz": kml_paths["kmz"],
+            "kml": kml_paths.get("kml"),
+            "kmz": kml_paths.get("kmz"),
             "zip": zip_path,
         },
     }
