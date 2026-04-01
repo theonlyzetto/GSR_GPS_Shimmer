@@ -714,9 +714,19 @@ def run_pipeline(
         if col not in df.columns:
             return df
 
+        # to datetime
         df[col] = pd.to_datetime(df[col], errors="coerce")
+
+        # remove timezone (critical!)
+        try:
+            df[col] = df[col].dt.tz_localize(None)
+        except Exception:
+            pass
+
+        # drop invalid
         df = df.dropna(subset=[col])
-        df = df.drop_duplicates(subset=[col])
+
+        # sort (required for merge_asof)
         df = df.sort_values(col)
 
         return df
@@ -725,7 +735,7 @@ def run_pipeline(
     gps = prep_for_asof(gps)
     fb = prep_for_asof(fb)
 
-    # ---------- MERGE ----------
+    # ---------- MERGE: feedback ----------
     feedback_geo = (
         pd.merge_asof(
             fb,
@@ -738,10 +748,11 @@ def run_pipeline(
         .reset_index(drop=True)
     )
 
+    # ---------- MERGE: main ----------
     merged = (
         pd.merge_asof(
-            df_gsr.sort_values("Timestamp"),
-            gps.sort_values("Timestamp"),
+            df_gsr,
+            gps,
             on="Timestamp",
             direction="nearest",
             tolerance=pd.Timedelta(milliseconds=cfg.merge_tolerance_ms),
@@ -749,6 +760,7 @@ def run_pipeline(
         .dropna(subset=["latitude", "longitude"])
         .reset_index(drop=True)
     )
+
     # ---------------- study/name for labels/titles ----------------
     study = "NA"
     name = "NA"
