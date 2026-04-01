@@ -710,23 +710,24 @@ def run_pipeline(
     fb = read_feedback(db_path, run_id=run_id)
 
     # ---------- HARD FIX: merge_asof safe ----------
+
+    print("fb dtype:", fb["Timestamp"].dtype)
+    print("gps dtype:", gps["Timestamp"].dtype)
+
     def prep_for_asof(df, col="Timestamp"):
         if col not in df.columns:
             return df
 
-        # to datetime
+        # 1. hart zu datetime konvertieren
         df[col] = pd.to_datetime(df[col], errors="coerce")
 
-        # remove timezone (critical!)
-        try:
-            df[col] = df[col].dt.tz_localize(None)
-        except Exception:
-            pass
+        # 2. timezone entfernen / vereinheitlichen
+        df[col] = df[col].astype("datetime64[ns]")
 
-        # drop invalid
+        # 3. NaT raus
         df = df.dropna(subset=[col])
 
-        # sort (required for merge_asof)
+        # 4. sortieren
         df = df.sort_values(col)
 
         return df
@@ -734,6 +735,7 @@ def run_pipeline(
     df_gsr = prep_for_asof(df_gsr)
     gps = prep_for_asof(gps)
     fb = prep_for_asof(fb)
+
 
     # ---------- MERGE: feedback ----------
     feedback_geo = (
@@ -776,6 +778,7 @@ def run_pipeline(
         except Exception:
             pass
 
+    # -------------------- Exports (CSVs) --------------------
     # -------------------- Exports (CSVs) --------------------
     out_csv_dir = os.path.join(out_dir, "csv")
     os.makedirs(out_csv_dir, exist_ok=True)
