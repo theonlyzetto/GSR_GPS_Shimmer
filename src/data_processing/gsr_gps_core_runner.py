@@ -709,25 +709,27 @@ def run_pipeline(
 
     fb = read_feedback(db_path, run_id=run_id)
 
-    # ---------- FIX: gleiche Timestamp-Typen ----------
-    def ensure_datetime(df, col="Timestamp"):
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
+    # ---------- HARD FIX: merge_asof safe ----------
+    def prep_for_asof(df, col="Timestamp"):
+        if col not in df.columns:
+            return df
+
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+        df = df.dropna(subset=[col])
+        df = df.drop_duplicates(subset=[col])
+        df = df.sort_values(col)
+
         return df
 
-    df_gsr = ensure_datetime(df_gsr)
-    gps = ensure_datetime(gps)
-    fb = ensure_datetime(fb)
+    df_gsr = prep_for_asof(df_gsr)
+    gps = prep_for_asof(gps)
+    fb = prep_for_asof(fb)
 
-    # optional aber sicher:
-    df_gsr = df_gsr.sort_values("Timestamp")
-    gps = gps.sort_values("Timestamp")
-    fb = fb.sort_values("Timestamp")
-
+    # ---------- MERGE ----------
     feedback_geo = (
         pd.merge_asof(
-            fb.sort_values("Timestamp"),
-            gps.sort_values("Timestamp"),
+            fb,
+            gps,
             on="Timestamp",
             direction="nearest",
             tolerance=pd.Timedelta(milliseconds=cfg.merge_tolerance_ms),
