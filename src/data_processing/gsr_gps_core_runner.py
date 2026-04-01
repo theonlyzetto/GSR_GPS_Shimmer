@@ -709,6 +709,21 @@ def run_pipeline(
 
     fb = read_feedback(db_path, run_id=run_id)
 
+    # ---------- FIX: gleiche Timestamp-Typen ----------
+    def ensure_datetime(df, col="Timestamp"):
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+        return df
+
+    df_gsr = ensure_datetime(df_gsr)
+    gps = ensure_datetime(gps)
+    fb = ensure_datetime(fb)
+
+    # optional aber sicher:
+    df_gsr = df_gsr.sort_values("Timestamp")
+    gps = gps.sort_values("Timestamp")
+    fb = fb.sort_values("Timestamp")
+
     feedback_geo = (
         pd.merge_asof(
             fb.sort_values("Timestamp"),
